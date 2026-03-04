@@ -5,6 +5,12 @@
  * Keep this minimal - no business rules here.
  */
 
+// Re-export sub-modules
+export * from './events';
+export * from './http';
+export * from './policies';
+export * from './ports';
+
 // Generic ID type
 export interface EntityId<T extends string = string> {
   readonly value: T;

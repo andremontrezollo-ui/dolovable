@@ -1,14 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-  "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "DENY",
-  "Referrer-Policy": "no-referrer",
-  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-};
+import { jsonResponse, corsResponse } from "../_shared/security-headers.ts";
+import { validationError, rateLimitError, internalError, methodNotAllowed, errorResponse, ErrorCodes } from "../_shared/error-response.ts";
+import { checkRateLimit, recordRateLimit, hashString } from "../_shared/rate-limiter.ts";
+import { logInfo, logWarn, logError, generateRequestId } from "../_shared/structured-logger.ts";
 
 const VALIDATION = {
   subject: { min: 3, max: 100 },
@@ -17,11 +11,7 @@ const VALIDATION = {
 };
 
 function sanitizeInput(input: string): string {
-  return input
-    .trim()
-    .replace(/\0/g, "")
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
-    .replace(/\s{3,}/g, "  ");
+  return input.trim().replace(/\0/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").replace(/\s{3,}/g, "  ");
 }
 
 function generateTicketId(): string {
@@ -56,16 +46,11 @@ function validatePayload(body: unknown): { valid: true; data: { subject: string;
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return corsResponse();
+  if (req.method !== "POST") return methodNotAllowed();
 
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  const requestId = generateRequestId();
+  const startTime = Date.now();
 
   try {
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
@@ -77,41 +62,26 @@ Deno.serve(async (req) => {
     );
 
     // Rate limit: max 5 tickets per 10 minutes per IP
-    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    const { count } = await supabase
-      .from("rate_limits")
-      .select("*", { count: "exact", head: true })
-      .eq("ip_hash", ipHash)
-      .eq("endpoint", "contact")
-      .gte("created_at", tenMinAgo);
+    const rl = await checkRateLimit(ipHash, { endpoint: "contact", maxRequests: 5, windowSeconds: 600 }, supabase);
 
-    if ((count ?? 0) >= 5) {
-      return new Response(JSON.stringify({ error: "Too many requests. Please try again later." }), {
-        status: 429,
-        headers: { ...corsHeaders, "Content-Type": "application/json", "Retry-After": "600" },
-      });
+    if (!rl.allowed) {
+      logWarn("Rate limit triggered", { requestId, endpoint: "contact", rateLimitTriggered: true, status: 429 });
+      return rateLimitError(rl.retryAfterSeconds);
     }
 
     let body: unknown;
     try {
       body = await req.json();
     } catch {
-      return new Response(JSON.stringify({ error: "Invalid JSON" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return validationError("Invalid JSON");
     }
 
     const validation = validatePayload(body);
     if (!validation.valid) {
-      return new Response(JSON.stringify({ error: validation.error }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return validationError(validation.error);
     }
 
-    // Record rate limit
-    await supabase.from("rate_limits").insert({ ip_hash: ipHash, endpoint: "contact" });
+    await recordRateLimit(ipHash, "contact", supabase);
 
     const ticketId = generateTicketId();
 
@@ -128,37 +98,15 @@ Deno.serve(async (req) => {
       .single();
 
     if (error) {
-      console.error("DB error:", error);
-      return new Response(JSON.stringify({ error: "Failed to create ticket" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      logError("DB error creating ticket", { requestId, endpoint: "contact", status: 500, latencyMs: Date.now() - startTime });
+      return internalError();
     }
 
-    return new Response(
-      JSON.stringify({
-        ticketId: data.ticket_id,
-        createdAt: data.created_at,
-      }),
-      {
-        status: 201,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    logInfo("Ticket created", { requestId, endpoint: "contact", status: 201, latencyMs: Date.now() - startTime });
+
+    return jsonResponse({ ticketId: data.ticket_id, createdAt: data.created_at }, 201);
   } catch (err) {
-    console.error("Unexpected error:", err);
-    return new Response(JSON.stringify({ error: "Internal server error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    logError("Unexpected error", { requestId, endpoint: "contact", status: 500, latencyMs: Date.now() - startTime });
+    return internalError();
   }
 });
-
-async function hashString(input: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(input);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}

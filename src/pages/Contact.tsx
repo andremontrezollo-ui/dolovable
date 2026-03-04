@@ -73,7 +73,7 @@ export default function Contact() {
       setApiError(
         apiResult.status === 429
           ? "Too many requests. Please wait a few minutes before trying again."
-          : apiResult.error
+          : apiResult.error.message
       );
       return;
     }

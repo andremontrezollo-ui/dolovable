@@ -5,3 +5,12 @@ verify_jwt = false
 
 [functions.contact]
 verify_jwt = false
+
+[functions.health]
+verify_jwt = false
+
+[functions.mix-session-status]
+verify_jwt = false
+
+[functions.cleanup]
+verify_jwt = false

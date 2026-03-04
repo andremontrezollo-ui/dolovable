@@ -85,7 +85,7 @@ export default function MixingPage() {
     if (result.error) {
       setError(result.status === 429 
         ? "Too many requests. Please wait a few minutes." 
-        : result.error);
+        : result.error.message);
       setLoading(false);
       return;
     }

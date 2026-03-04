@@ -1,14 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-  "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "DENY",
-  "Referrer-Policy": "no-referrer",
-  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-};
+import { jsonResponse, corsResponse } from "../_shared/security-headers.ts";
+import { rateLimitError, internalError, methodNotAllowed } from "../_shared/error-response.ts";
+import { checkRateLimit, recordRateLimit, hashString } from "../_shared/rate-limiter.ts";
+import { logInfo, logWarn, logError, generateRequestId } from "../_shared/structured-logger.ts";
 
 const TESTNET_CHARSET = "0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -20,19 +14,13 @@ function generateMockTestnetAddress(): string {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return corsResponse();
+  if (req.method !== "POST") return methodNotAllowed();
 
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  const requestId = generateRequestId();
+  const startTime = Date.now();
 
   try {
-    // Rate limit by IP
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
     const ipHash = await hashString(clientIp);
 
@@ -42,26 +30,17 @@ Deno.serve(async (req) => {
     );
 
     // Rate limit: max 10 sessions per 10 minutes per IP
-    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    const { count } = await supabase
-      .from("rate_limits")
-      .select("*", { count: "exact", head: true })
-      .eq("ip_hash", ipHash)
-      .eq("endpoint", "mix-sessions")
-      .gte("created_at", tenMinAgo);
+    const rl = await checkRateLimit(ipHash, { endpoint: "mix-sessions", maxRequests: 10, windowSeconds: 600 }, supabase);
 
-    if ((count ?? 0) >= 10) {
-      return new Response(JSON.stringify({ error: "Too many requests. Try again later." }), {
-        status: 429,
-        headers: { ...corsHeaders, "Content-Type": "application/json", "Retry-After": "600" },
-      });
+    if (!rl.allowed) {
+      logWarn("Rate limit triggered", { requestId, endpoint: "mix-sessions", rateLimitTriggered: true, status: 429 });
+      return rateLimitError(rl.retryAfterSeconds);
     }
 
-    // Record rate limit hit
-    await supabase.from("rate_limits").insert({ ip_hash: ipHash, endpoint: "mix-sessions" });
+    await recordRateLimit(ipHash, "mix-sessions", supabase);
 
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 60 * 1000); // 30 min TTL
+    const expiresAt = new Date(now.getTime() + 30 * 60 * 1000);
     const depositAddress = generateMockTestnetAddress();
 
     const { data, error } = await supabase
@@ -76,40 +55,21 @@ Deno.serve(async (req) => {
       .single();
 
     if (error) {
-      console.error("DB error:", error);
-      return new Response(JSON.stringify({ error: "Failed to create session" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      logError("DB error creating session", { requestId, endpoint: "mix-sessions", status: 500, latencyMs: Date.now() - startTime });
+      return internalError();
     }
 
-    return new Response(
-      JSON.stringify({
-        sessionId: data.id,
-        depositAddress: data.deposit_address,
-        createdAt: data.created_at,
-        expiresAt: data.expires_at,
-        status: data.status,
-      }),
-      {
-        status: 201,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    logInfo("Session created", { requestId, endpoint: "mix-sessions", status: 201, latencyMs: Date.now() - startTime });
+
+    return jsonResponse({
+      sessionId: data.id,
+      depositAddress: data.deposit_address,
+      createdAt: data.created_at,
+      expiresAt: data.expires_at,
+      status: data.status,
+    }, 201);
   } catch (err) {
-    console.error("Unexpected error:", err);
-    return new Response(JSON.stringify({ error: "Internal server error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    logError("Unexpected error", { requestId, endpoint: "mix-sessions", status: 500, latencyMs: Date.now() - startTime });
+    return internalError();
   }
 });
-
-async function hashString(input: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(input);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
