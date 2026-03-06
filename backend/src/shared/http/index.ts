@@ -8,3 +8,5 @@ export {
   internalError,
   methodNotAllowed,
 } from './ErrorResponse';
+export { HttpStatus } from './HttpStatus';
+export type { HttpStatusCode } from './HttpStatus';

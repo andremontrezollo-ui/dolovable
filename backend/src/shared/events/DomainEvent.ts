@@ -1,14 +1,15 @@
 /**
- * Base Domain Event Types
+ * Base Domain Event
  * 
- * All domain events across modules extend this base.
+ * All domain events across modules must implement this interface.
  * Events are the primary inter-module communication mechanism.
  */
 
 export interface DomainEvent {
   readonly type: string;
   readonly timestamp: Date;
-  readonly correlationId?: string;
+  readonly aggregateId?: string;
+  readonly metadata?: Record<string, unknown>;
 }
 
 /**
@@ -17,27 +18,28 @@ export interface DomainEvent {
  */
 export type SystemEvent =
   // Address Generator
-  | { type: 'ADDRESS_TOKEN_EMITTED'; tokenId: string; namespace: string; expiresAt: Date; timestamp: Date }
-  | { type: 'ADDRESS_TOKEN_RESOLVED'; tokenId: string; timestamp: Date }
-  | { type: 'ADDRESS_TOKEN_EXPIRED'; tokenId: string; reason: 'ttl' | 'usage' | 'manual'; timestamp: Date }
+  | { type: 'ADDRESS_TOKEN_EMITTED'; tokenId: string; namespace: string; expiresAt: Date; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'ADDRESS_TOKEN_RESOLVED'; tokenId: string; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'ADDRESS_TOKEN_EXPIRED'; tokenId: string; reason: 'ttl' | 'usage' | 'manual'; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
   // Blockchain Monitor
-  | { type: 'BLOCK_OBSERVED'; height: { value: number }; transactionCount: number; timestamp: Date }
-  | { type: 'TRANSACTION_CONFIRMED'; txId: { hash: string }; confirmations: { count: number; isConfirmed: boolean }; timestamp: Date }
-  | { type: 'FEE_ESTIMATE_UPDATED'; satPerVbyte: number; priority: 'low' | 'medium' | 'high'; timestamp: Date }
+  | { type: 'DEPOSIT_DETECTED'; txId: string; address: string; amount: number; blockHeight: number; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'DEPOSIT_CONFIRMED'; txId: string; confirmations: number; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'TRANSACTION_REORG_DETECTED'; txId: string; previousBlock: number; newBlock: number; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
   // Liquidity Pool
-  | { type: 'LIQUIDITY_RESERVED'; obligationId: string; amount: number; timestamp: Date }
-  | { type: 'LIQUIDITY_RELEASED'; obligationId: string; amount: number; reason: 'fulfilled' | 'expired' | 'cancelled'; timestamp: Date }
-  | { type: 'POOL_HEALTH_CHANGED'; previousStatus: string; newStatus: string; utilizationRate: number; timestamp: Date }
+  | { type: 'LIQUIDITY_ALLOCATED'; allocationId: string; amount: number; poolId: string; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'OBLIGATION_RESERVED'; obligationId: string; amount: number; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'POOL_HEALTH_WARNING'; poolId: string; status: string; utilizationRate: number; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'POOL_REBALANCED'; poolId: string; previousBalance: number; newBalance: number; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
   // Payment Scheduler
-  | { type: 'PAYMENT_PLANNED'; paymentId: string; scheduledFor: Date; windowStart: Date; windowEnd: Date; timestamp: Date }
-  | { type: 'PAYMENT_BATCH_CREATED'; batchId: string; paymentCount: number; timestamp: Date }
-  | { type: 'PAYMENT_EXECUTED'; paymentId: string; batchId?: string; success: boolean; timestamp: Date }
+  | { type: 'PAYMENT_SCHEDULED'; paymentId: string; scheduledFor: Date; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'PAYMENT_DUE'; paymentId: string; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'PAYMENT_EXECUTED'; paymentId: string; success: boolean; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'PAYMENT_CANCELLED'; paymentId: string; reason: string; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
   // Log Minimizer
-  | { type: 'LOG_ENTRY_CREATED'; entryId: string; dataClass: string; expiresAt: Date; timestamp: Date }
-  | { type: 'LOG_ENTRY_REDACTED'; entryId: string; reason: 'policy' | 'manual' | 'ttl'; timestamp: Date }
-  | { type: 'COMPLIANCE_REPORT_GENERATED'; reportId: string; entriesProcessed: number; entriesRedacted: number; timestamp: Date }
-  // Session Management
-  | { type: 'SESSION_CREATED'; sessionId: string; expiresAt: Date; timestamp: Date }
-  | { type: 'SESSION_EXPIRED'; sessionId: string; timestamp: Date };
+  | { type: 'LOG_REDACTED'; entryId: string; fieldsRedacted: string[]; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'LOG_PURGED'; entriesCount: number; reason: string; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  // Session
+  | { type: 'SESSION_CREATED'; sessionId: string; expiresAt: Date; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> }
+  | { type: 'SESSION_EXPIRED'; sessionId: string; timestamp: Date; aggregateId?: string; metadata?: Record<string, unknown> };
 
 export type EventType = SystemEvent['type'];

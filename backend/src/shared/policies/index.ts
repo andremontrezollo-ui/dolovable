@@ -1,1 +1,2 @@
-export type { Policy, ExplainablePolicy } from './Policy';
+export type { Policy } from './Policy';
+export type { ExplainablePolicy } from './ExplainablePolicy';

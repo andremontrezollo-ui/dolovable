@@ -1,7 +1,5 @@
 /**
  * Standardized Error Response Format
- * 
- * All API controllers and Edge Functions must use this format.
  */
 
 export interface ErrorDetail {
@@ -14,7 +12,6 @@ export interface ErrorResponse {
   readonly error: ErrorDetail;
 }
 
-// Common error codes
 export const ErrorCodes = {
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   NOT_FOUND: 'NOT_FOUND',
@@ -24,22 +21,14 @@ export const ErrorCodes = {
   BAD_REQUEST: 'BAD_REQUEST',
   UNAUTHORIZED: 'UNAUTHORIZED',
   SESSION_EXPIRED: 'SESSION_EXPIRED',
+  CONFLICT: 'CONFLICT',
+  FORBIDDEN: 'FORBIDDEN',
 } as const;
 
 export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
 
-export function createErrorResponse(
-  code: ErrorCode,
-  message: string,
-  details?: Record<string, unknown>
-): ErrorResponse {
-  return {
-    error: {
-      code,
-      message,
-      ...(details ? { details } : {}),
-    },
-  };
+export function createErrorResponse(code: ErrorCode, message: string, details?: Record<string, unknown>): ErrorResponse {
+  return { error: { code, message, ...(details ? { details } : {}) } };
 }
 
 export function validationError(message: string, details?: Record<string, unknown>): ErrorResponse {
@@ -51,9 +40,7 @@ export function notFoundError(message = 'Resource not found'): ErrorResponse {
 }
 
 export function rateLimitedError(retryAfterSeconds: number): ErrorResponse {
-  return createErrorResponse(ErrorCodes.RATE_LIMITED, 'Too many requests. Please try again later.', {
-    retryAfterSeconds,
-  });
+  return createErrorResponse(ErrorCodes.RATE_LIMITED, 'Too many requests.', { retryAfterSeconds });
 }
 
 export function internalError(message = 'Internal server error'): ErrorResponse {
