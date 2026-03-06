@@ -1,0 +1,39 @@
+/**
+ * AllocateLiquidity Use Case
+ * Emits LIQUIDITY_ALLOCATED, consumed conceptually by payment-scheduler.
+ */
+
+import type { LiquidityPoolRepository } from '../ports/liquidity-pool-repository.port';
+import type { PoolEventPublisher } from '../ports/event-publisher.port';
+import type { PoolClock } from '../ports/clock.port';
+import type { LiquidityAllocationDto } from '../dtos/liquidity-allocation.dto';
+import { Amount } from '../../domain/value-objects/amount.vo';
+import { AllocationPolicy } from '../../domain/policies/allocation-policy';
+import { createLiquidityAllocatedEvent } from '../../domain/events/liquidity-allocated.event';
+
+export class AllocateLiquidityUseCase {
+  private readonly policy = new AllocationPolicy();
+
+  constructor(
+    private readonly poolRepo: LiquidityPoolRepository,
+    private readonly publisher: PoolEventPublisher,
+    private readonly clock: PoolClock,
+  ) {}
+
+  async execute(dto: LiquidityAllocationDto): Promise<void> {
+    const pool = await this.poolRepo.findById(dto.poolId);
+    if (!pool) throw new Error(`Pool ${dto.poolId} not found`);
+
+    const check = this.policy.evaluate({
+      requestedAmount: dto.amount,
+      availableAmount: pool.availableAmount.toBtc(),
+      poolStatus: pool.status,
+    });
+
+    if (!check.allowed) throw new Error(check.reason);
+
+    pool.reserve(Amount.btc(dto.amount), this.clock.now());
+    await this.poolRepo.save(pool);
+    await this.publisher.publish(createLiquidityAllocatedEvent(dto.allocationId, dto.amount, dto.poolId));
+  }
+}
