@@ -1,0 +1,1 @@
+export interface LogEntryDto { readonly id: string; readonly level: string; readonly classification: string; readonly message: string; readonly fields: Record<string, unknown>; readonly createdAt: string; readonly expiresAt: string; }

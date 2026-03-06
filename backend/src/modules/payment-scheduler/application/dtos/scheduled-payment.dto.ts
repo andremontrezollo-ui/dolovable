@@ -1,0 +1,1 @@
+export interface ScheduledPaymentDto { readonly paymentId: string; readonly destination: string; readonly amount: number; readonly status: string; readonly scheduledFor: string; readonly createdAt: string; readonly executedAt: string | null; }
