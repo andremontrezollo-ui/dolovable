@@ -1,14 +1,17 @@
 /**
- * EventBus Interface
- * 
- * Typed, decoupled event distribution contract.
- * Modules publish events without knowing consumers.
+ * Resilient EventBus contract.
+ * Supports publish, subscribe, deduplication via inbox, and DLQ.
  */
 
-import type { DomainEvent, SystemEvent, EventType } from './DomainEvent';
+import type { DomainEvent, EventType, SystemEvent } from './DomainEvent';
+import type { EventHandler } from './event-handler';
 
-export interface EventHandler<E extends DomainEvent = SystemEvent> {
-  handle(event: E): Promise<void>;
+export { EventHandler };
+
+export interface EventBusOptions {
+  maxRetries?: number;
+  retryDelayMs?: number;
+  enableDeduplication?: boolean;
 }
 
 export interface EventBus {
@@ -16,7 +19,17 @@ export interface EventBus {
   publishAll(events: SystemEvent[]): Promise<void>;
   subscribe<T extends EventType>(
     eventType: T,
-    handler: EventHandler<Extract<SystemEvent, { type: T }>>
+    handler: EventHandler<Extract<SystemEvent, { type: T }>>,
   ): () => void;
   subscribeAll(handler: EventHandler<SystemEvent>): () => void;
+  getDeadLetterQueue(): readonly FailedEvent[];
+  retryDeadLetter(eventId: string): Promise<boolean>;
+}
+
+export interface FailedEvent {
+  readonly event: SystemEvent;
+  readonly error: string;
+  readonly failedAt: Date;
+  readonly handlerName: string;
+  readonly retryCount: number;
 }

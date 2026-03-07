@@ -1,15 +1,14 @@
 /**
- * Shared Kernel
- * 
- * Common types shared across all modules.
+ * Shared Kernel — exports all shared abstractions.
  */
 
 export * from './events';
 export * from './http';
 export * from './ports';
 export * from './policies';
+export * from './config';
+export * from './logging';
 
-// Result type for operations that can fail
 export type Result<T, E = Error> =
   | { success: true; value: T }
   | { success: false; error: E };
@@ -22,7 +21,6 @@ export function failure<E>(error: E): Result<never, E> {
   return { success: false, error };
 }
 
-// Money/Amount helpers
 export function btcToSat(btc: number): number {
   return Math.round(btc * 100_000_000);
 }
